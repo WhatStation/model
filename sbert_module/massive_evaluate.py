@@ -8,17 +8,21 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import time
 import pandas as pd
 from tqdm.auto import tqdm
+import torch
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 print("[INFO] Loading Data and Model...")
 df = data_setup.get_data(data_path=CFG.DATA_PATH,
-                         file_name=CFG.EVALUATE_CSV_FILE)
+                         file_name=CFG.PREDICT_CSV_FILE)
 df = df[['name', 'review']]
 reviews = df['review'].tolist()
 
 s_bert = model_builder.load_sbert(model_path=CFG.SBERT_MODEL_PATH,
                                   sbert_path=CFG.SBERT_MODEL_FOLDER)
-classifier = model_builder.get_classifier()
-classifier.load_weights(f"{CFG.CLASSIFIER_MODEL_PATH}/{CFG.CLASSIFIER_MODEL_DATE}/{CFG.CLASSIFIER_MODEL_FILE}.h5")
+classifier = model_builder.SimpleMLC(n_classes=CFG.N_CLASSES)
+classifier.load_state_dict(torch.load(f'{CFG.CLASSIFIER_MODEL_PATH}/{CFG.CLASSIFIER_MODEL_DATE}/{CFG.CLASSIFIER_MODEL_FILE}.pth',
+                                          map_location=torch.device(device)))
 
 print('[INFO] Done!')
 
@@ -30,7 +34,9 @@ df_score = pd.DataFrame()
 for i in tqdm(range(len(reviews)//128+1)):
     try:
         vectorized = s_bert.encode(reviews[i*128:(i+1)*128])#.reshape((1, -1))
-        result = classifier.predict(vectorized, verbose=0)
+        vectorized = torch.tensor(vectorized)
+        result = classifier(vectorized)
+        result = torch.sigmoid(result).detach().cpu().numpy()
         df_score = pd.concat([df_score, pd.DataFrame(result, columns=CFG.CLASS_NAMES)], axis=0)
     except IndexError as e:
         print(e)
